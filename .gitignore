@@ -5,4 +5,4 @@ __pycache__/
 *.pyd
 .idea/
 .vscode/
-.AGENTS.md
+AGENTS.md

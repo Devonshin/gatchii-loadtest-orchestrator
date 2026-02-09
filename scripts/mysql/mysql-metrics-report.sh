@@ -3,7 +3,7 @@
 # Summarize mysql-metrics.sh CSV output into a readable report.
 #
 # Usage:
-#   ./scripts/mysql-metrics-report.sh <csv_path> [--interval <seconds>] [--title <text>] [--out <path>]
+#   ./scripts/mysql/mysql-metrics-report.sh <csv_path> [--interval <seconds>] [--title <text>] [--out <path>]
 #
 # Notes:
 # - Interval is used to estimate duration (duration ~= (rows-1)*interval).

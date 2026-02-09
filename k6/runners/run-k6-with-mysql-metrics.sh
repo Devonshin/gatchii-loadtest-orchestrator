@@ -3,7 +3,7 @@
 # Orchestrate k6 runs and MySQL metric sampling.
 #
 # - Runs avg/peak/breakpoint profiles per port.
-# - For each profile, starts scripts/mysql-metrics.sh in the background and stops it after k6 completes.
+# - For each profile, starts scripts/mysql/mysql-metrics.sh in the background and stops it after k6 completes.
 # - Writes logs/CSVs under .idea/.project-docs/<YYYY-MM-DD>/runs/.
 #
 # Required env vars (DB):
@@ -66,14 +66,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Resolve runner root by walking up until we find runner/scripts.
+# Resolve runner root by walking up until we find scripts/mysql/mysql-metrics.sh.
 # This makes the script resilient to layout changes (e.g., previously under runner/projects/<id>/).
 find_runner_dir() {
   local start_dir="$1"
   local dir="$start_dir"
 
   for _ in 1 2 3 4 5 6; do
-    if [[ -d "$dir/scripts" && -f "$dir/scripts/mysql-metrics.sh" ]]; then
+    if [[ -d "$dir/scripts/mysql" && -f "$dir/scripts/mysql/mysql-metrics.sh" ]]; then
       echo "$dir"
       return 0
     fi
@@ -92,21 +92,22 @@ find_runner_dir() {
 
 RUNNER_DIR="$(find_runner_dir "$SCRIPT_DIR")"
 if [[ -z "$RUNNER_DIR" ]]; then
-  echo "ERROR: Failed to locate runner root (expected scripts/mysql-metrics.sh near $SCRIPT_DIR)" >&2
+  echo "ERROR: Failed to locate runner root (expected scripts/mysql/mysql-metrics.sh near $SCRIPT_DIR)" >&2
   exit 1
 fi
 
-PROJECT_ROOT="$(cd "$RUNNER_DIR/.." && pwd)"
+PROJECT_ROOT="$RUNNER_DIR"
 SCRIPTS_DIR="$RUNNER_DIR/scripts"
+K6_SCENARIOS_DIR="$PROJECT_ROOT/k6/scenarios"
 
-MONITOR_SCRIPT="$SCRIPTS_DIR/mysql-metrics.sh"
-REPORT_SCRIPT="$SCRIPTS_DIR/mysql-metrics-report.sh"
-TIMELINE_SCRIPT="$SCRIPTS_DIR/k6-timeline.py"
-DIGEST_SNAPSHOT_SCRIPT="$SCRIPTS_DIR/mysql-ps-digest-snapshot.sh"
-DIGEST_REPORT_SCRIPT="$SCRIPTS_DIR/mysql-ps-digest-report.py"
+MONITOR_SCRIPT="$SCRIPTS_DIR/mysql/mysql-metrics.sh"
+REPORT_SCRIPT="$SCRIPTS_DIR/mysql/mysql-metrics-report.sh"
+TIMELINE_SCRIPT="$SCRIPTS_DIR/reports/k6-timeline.py"
+DIGEST_SNAPSHOT_SCRIPT="$SCRIPTS_DIR/mysql/mysql-ps-digest-snapshot.sh"
+DIGEST_REPORT_SCRIPT="$SCRIPTS_DIR/mysql/mysql-ps-digest-report.py"
 
-APP_METRICS_SCRIPT="$SCRIPTS_DIR/docker-container-metrics.sh"
-APP_METRICS_REPORT_SCRIPT="$SCRIPTS_DIR/docker-container-metrics-report.py"
+APP_METRICS_SCRIPT="$SCRIPTS_DIR/docker/docker-container-metrics.sh"
+APP_METRICS_REPORT_SCRIPT="$SCRIPTS_DIR/docker/docker-container-metrics-report.py"
 
 # Load orchestrator environment variables if present.
 # This allows running the script without manually exporting variables.
@@ -498,7 +499,7 @@ should_stop_after_failure() {
 write_info "Run directory: $RUN_DIR"
 
 # Ensure k6 script relative paths resolve even if the caller's CWD is different.
-cd "$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
 
 for port in $PORTS; do
   write_info "========== PORT $port =========="
@@ -514,7 +515,7 @@ for port in $PORTS; do
 
   # AVG
   avg_ec="$(run_k6_with_mysql "$port" "avg" "$K6_AVG_SECONDS" \
-    "k6 run -e AVG_RPS=${AVG_RPS} -e DURATION=${AVG_DURATION} -e PRE_ALLOCATED_VUS=80 -e MAX_VUS=1200 -e TARGET_URL=http://localhost:${port}${URL_PATH} rps-load.js")"
+    "k6 run -e AVG_RPS=${AVG_RPS} -e DURATION=${AVG_DURATION} -e PRE_ALLOCATED_VUS=80 -e MAX_VUS=1200 -e TARGET_URL=http://localhost:${port}${URL_PATH} ${K6_SCENARIOS_DIR}/rps-load.js")"
   echo "avg_exit_code=$avg_ec" >> "$RUN_DIR/$port/summary.txt"
   if [[ "$avg_ec" -ne 0 ]]; then
     fail_count=$((fail_count + 1))
@@ -532,7 +533,7 @@ for port in $PORTS; do
   for step_rps in $PEAK_STEPS; do
     phase_name="peak-${step_rps}"
     peak_ec="$(run_k6_with_mysql "$port" "$phase_name" "$K6_PEAK_SECONDS" \
-      "k6 run -e TARGET_RPS=${step_rps} -e PEAK_RPS=${PEAK_RPS} -e DURATION=${PEAK_DURATION} -e PRE_ALLOCATED_VUS=200 -e MAX_VUS=3000 -e TARGET_URL=http://localhost:${port}${URL_PATH} rps-peak.js")"
+      "k6 run -e TARGET_RPS=${step_rps} -e PEAK_RPS=${PEAK_RPS} -e DURATION=${PEAK_DURATION} -e PRE_ALLOCATED_VUS=200 -e MAX_VUS=3000 -e TARGET_URL=http://localhost:${port}${URL_PATH} ${K6_SCENARIOS_DIR}/rps-peak.js")"
 
     echo "${phase_name}_exit_code=$peak_ec" >> "$RUN_DIR/$port/summary.txt"
     last_peak_ec="$peak_ec"
@@ -553,7 +554,7 @@ for port in $PORTS; do
 
   # BREAKPOINT
   bp_ec="$(run_k6_with_mysql "$port" "breakpoint" "$K6_BP_SECONDS" \
-    "k6 run -e START_RPS=${BP_START_RPS} -e STEP_1_RPS=${BP_STEP_1_RPS} -e STEP_2_RPS=${BP_STEP_2_RPS} -e STEP_3_RPS=${BP_STEP_3_RPS} -e STEP_4_RPS=${BP_STEP_4_RPS} -e STEP_DURATION=${BP_STEP_DURATION} -e RAMP_DOWN=${BP_RAMP_DOWN} -e PRE_ALLOCATED_VUS=200 -e MAX_VUS=4000 -e ABORT_ON_FAIL=true -e TARGET_URL=http://localhost:${port}${URL_PATH} rps-breakpoint.js")"
+    "k6 run -e START_RPS=${BP_START_RPS} -e STEP_1_RPS=${BP_STEP_1_RPS} -e STEP_2_RPS=${BP_STEP_2_RPS} -e STEP_3_RPS=${BP_STEP_3_RPS} -e STEP_4_RPS=${BP_STEP_4_RPS} -e STEP_DURATION=${BP_STEP_DURATION} -e RAMP_DOWN=${BP_RAMP_DOWN} -e PRE_ALLOCATED_VUS=200 -e MAX_VUS=4000 -e ABORT_ON_FAIL=true -e TARGET_URL=http://localhost:${port}${URL_PATH} ${K6_SCENARIOS_DIR}/rps-breakpoint.js")"
   echo "breakpoint_exit_code=$bp_ec" >> "$RUN_DIR/$port/summary.txt"
   if [[ "$bp_ec" -ne 0 ]]; then
     fail_count=$((fail_count + 1))
